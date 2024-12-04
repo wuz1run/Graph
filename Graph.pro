@@ -10,13 +10,11 @@ CONFIG += c++17
 
 SOURCES += \
     MyView.cpp \
-    location.cpp \
     main.cpp \
     widget.cpp
 
 HEADERS += \
     MyView.h \
-    location.h \
     widget.h
 
 FORMS += \

@@ -7,7 +7,7 @@
 
 class MyView : public QGraphicsView
 {
-
+    Q_OBJECT
 public:
     MyView(QGraphicsScene *scene) : QGraphicsView(scene) {}
 
@@ -18,6 +18,9 @@ private:
     bool isDragging = false;  // 标记是否正在拖动
     QPointF lastScenePos;     // 记录上一次鼠标的位置
     bool capture;
+signals:
+    void rightclicked(qreal x,qreal y);
+    void leftclicked(qreal x,qreal y);
 
 
 };

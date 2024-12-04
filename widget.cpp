@@ -7,6 +7,7 @@
 #include "QMessageBox"
 #include "QInputDialog"
 #include "location.h"
+
 Widget::Widget(QWidget *parent)
     : QWidget(parent)
     , ui(new Ui::Widget), scene(new QGraphicsScene(this))
@@ -15,8 +16,7 @@ Widget::Widget(QWidget *parent)
     this->setLayout(layout);
 
     // 创建矩形项
-    QGraphicsRectItem *rectItem = new QGraphicsRectItem();
-    rectItem->setRect(0, 0, 100, 100);
+
     scene->setSceneRect(-100, -100, 800, 600);
     QPixmap background("C:/Users/wuzir/Documents/Graph/map.jpg");  // 你的背景图片路径
 
@@ -26,8 +26,6 @@ Widget::Widget(QWidget *parent)
     backgroundItem->setZValue(-1);  // 设置 Z 值，让背景位于最底层
     backgroundItem->setPixmap(background.scaled(scene->sceneRect().size().toSize()));
     scene->addItem(backgroundItem);
-    // 将矩形项添加到场景
-    scene->addItem(rectItem);
 
     // 创建自定义视图 MyView
     MyView *MV = new MyView(scene);
@@ -35,15 +33,14 @@ Widget::Widget(QWidget *parent)
     layout->addWidget(MV);  // 将视图添加到布局中
 
     // 创建按钮
-    QPushButton *button1 = new QPushButton("Click Me");
-    QPushButton *button2 = new QPushButton("Clear Points");
+    QPushButton *button1 = new QPushButton("Clear all");
     layout->addWidget(button1);
-    layout->addWidget(button2);
     // 设置视图的拖动模式
     MV->setDragMode(QGraphicsView::ScrollHandDrag);
     connect(button1, &QPushButton::clicked, this, &Widget::onButtonClicked);
     loadPointsFromJson();
-
+    connect(MV, &MyView::rightclicked, this, &Widget::clickToAddPoint);
+    connect(MV, &MyView::leftclicked, this, &Widget::clickToConnectPoints);
 }
 
 Widget::~Widget()
@@ -63,21 +60,32 @@ void Widget::onMouseClicked(const QPointF &scenePos)
 
 void Widget::onButtonClicked()
 {
-    bool ok;
-    qreal x_pos = QInputDialog::getDouble(nullptr, "Input x pos", "Enter x position:", 0, -1000, 1000, 2, &ok);
-    if (!ok) return; // 如果用户点击取消或输入无效则返回
+    for (QGraphicsEllipseItem *point : points)
+    {
+        scene->removeItem(point);
+        delete point;
+    }
+    for (QGraphicsLineItem *line : lines)
+    {
+        scene->removeItem(line);
+        delete line;
+    }
 
-    qreal y_pos = QInputDialog::getDouble(nullptr, "Input y pos", "Enter y position:", 0, -1000, 1000, 2, &ok);
-    if (!ok) return; // 如果用户点击取消或输入无效则返回
-    QString name = QInputDialog::getText(nullptr,"Input point name","Enter point name");
-    // 创建一个新的矩形项，并设置其位置
-    loadPoint(x_pos,y_pos);
-    savePoint(x_pos,y_pos,name);
+    // 清空点和线的列表
+    points.clear();
+    lines.clear();
+
+    // 清空 JSON 数据文件
+    QFile file("C:\\Users\\wuzir\\Documents\\Graph\\points_and_lines.json");
+    if (file.exists())
+    {
+        file.remove();
+    }
 }
 
-void Widget::savePoint(qreal x,qreal y,QString name)
+void Widget::savePoint(qreal x, qreal y, QString name)
 {
-    qDebug() << "saving"<<Qt::endl;
+    qDebug() << "saving" << Qt::endl;
     QJsonObject pointObject;
     pointObject["x"] = x;
     pointObject["y"] = y;
@@ -93,73 +101,186 @@ void Widget::savePoint(qreal x,qreal y,QString name)
 // 鼠标点击事件
 void MyView::mousePressEvent(QMouseEvent *event)
 {
-    // 获取鼠标点击的位置（视图坐标系中的位置）
-    QPoint viewPos = event->pos(); // 转换为QPoint类型，适应mapToScene的需求
+    QPoint viewPos = event->pos(); // 视图坐标
+    QPointF scenePos = mapToScene(viewPos); // 场景坐标
 
-    // 将视图坐标转换为场景坐标
-    QPointF scenePos = mapToScene(viewPos);
-
-    // 打印鼠标点击的坐标（可以选择其他方式显示）
-    qDebug() << "Mouse clicked at scene position:" << scenePos;
+    if (event->button() == Qt::RightButton)
+    {
+        // 右键点击，触发添加点的事件
+        emit rightclicked(scenePos.rx(), scenePos.ry());
+    }
+    else if (event->button() == Qt::LeftButton)
+    {
+        // 左键点击，连接点
+        emit leftclicked(scenePos.rx(), scenePos.ry());
+    }
 
     QGraphicsView::mousePressEvent(event);
-    // 可选择弹出对话框显示坐标
 }
+
 void Widget::savePointsToJson()
 {
-    // 创建一个 JSON 文档，将点的数组写入文件
-    QJsonDocument doc(pointsArray);
-    QFile file("C:\\Users\\wuzir\\Documents\\Graph\\points.json");
+    // 创建一个 JSON 文档，首先保存点的信息
+    QJsonObject docObject;
+
+    // 保存点的数据
+    QJsonArray pointsJsonArray;
+    for (QGraphicsEllipseItem *point : points)
+    {
+        QJsonObject pointObject;
+        pointObject["x"] = point->pos().x();
+        pointObject["y"] = point->pos().y();
+        pointsJsonArray.append(pointObject);
+    }
+
+    docObject["points"] = pointsJsonArray;
+
+    // 保存线的数据
+    QJsonArray linesJsonArray = linesArray;  // 直接使用保存的线数据
+    docObject["lines"] = linesJsonArray;
+
+    // 将 JSON 文档写入文件
+    QFile file("C:\\Users\\wuzir\\Documents\\Graph\\points_and_lines.json");
     if (file.open(QIODevice::WriteOnly))
     {
+        QJsonDocument doc(docObject);
         file.write(doc.toJson());
         file.close();
     }
     else
     {
-        qDebug() << "Failed to open points.json for writing.";
+        qDebug() << "Failed to open points_and_lines.json for writing.";
     }
 }
+
 void Widget::loadPointsFromJson()
 {
-    QFile file("C:\\Users\\wuzir\\Documents\\Graph\\points.json");
+    QFile file("C:\\Users\\wuzir\\Documents\\Graph\\points_and_lines.json");
     if (file.open(QIODevice::ReadOnly))
     {
         QByteArray data = file.readAll();
         file.close();
         QJsonDocument doc = QJsonDocument::fromJson(data);
-        if (doc.isArray())
+        if (doc.isObject())
         {
-            pointsArray = doc.array();
-            // 遍历所有点
-            for (const QJsonValue &value : pointsArray)
+            QJsonObject docObject = doc.object();
+
+            // 加载点的数据
+            QJsonArray pointsJsonArray = docObject["points"].toArray();
+            for (const QJsonValue &value : pointsJsonArray)
             {
                 QJsonObject pointObject = value.toObject();
                 qreal x = pointObject["x"].toDouble();
                 qreal y = pointObject["y"].toDouble();
-                QString name = pointObject["name"].toString();
-                loadPoint(x,y);
-                qDebug() << "Loaded point:" << name << "at" << x << y;
+                loadPoint(x, y);
+            }
+
+            // 加载线的数据
+            QJsonArray linesJsonArray = docObject["lines"].toArray();
+            for (const QJsonValue &value : linesJsonArray)
+            {
+                QJsonObject lineObject = value.toObject();
+                qreal x1 = lineObject["x1"].toDouble();
+                qreal y1 = lineObject["y1"].toDouble();
+                qreal x2 = lineObject["x2"].toDouble();
+                qreal y2 = lineObject["y2"].toDouble();
+
+                // 重新绘制线
+                QGraphicsLineItem *lineItem = new QGraphicsLineItem();
+                lineItem->setLine(QLineF(x1, y1, x2, y2));
+                lineItem->setPen(QPen(Qt::blue, 2));  // 设置线条颜色和宽度
+                scene->addItem(lineItem);
             }
         }
     }
     else
     {
-        qDebug() << "Failed to open points.json for reading.";
+        qDebug() << "Failed to open points_and_lines.json for reading.";
     }
 }
+
 void Widget::loadPoint(qreal x, qreal y)
 {
-     QGraphicsEllipseItem *circleItem = new QGraphicsEllipseItem();
-    circleItem->setRect(x-12.5, y-12.5, 25, 25);
+    // 创建半径较小的圆（例如，半径为 10）
+    QGraphicsEllipseItem *circleItem = new QGraphicsEllipseItem();
+    circleItem->setRect(-10, -10, 20, 20);  // 圆的大小是 20x20，中心点在 (x, y)
     circleItem->setPen(QPen(Qt::black));
     circleItem->setBrush(QBrush(Qt::yellow));
     scene->addItem(circleItem);
+
+    // 设置点的位置
+    circleItem->setPos(x, y);  // 设置点的实际位置
+
+    points.append(circleItem);  // 将点添加到列表中
 }
-void Widget::loadLine(QString pos1, QString pos2)
+
+void Widget::clickToAddPoint(qreal x, qreal y)
 {
-
+    loadPoint(x, y);
+    QString name = QInputDialog::getText(nullptr, "Enter name", "Enter name");
+    savePoint(x, y, name);
 }
 
+void Widget::loadLine(qreal x1, qreal y1, qreal x2, qreal y2)
+{
+    // 创建一条线
+    QGraphicsLineItem *lineItem = new QGraphicsLineItem();
+    lineItem->setLine(QLineF(x1, y1, x2, y2));
+    lineItem->setPen(QPen(Qt::blue, 2));  // 设置线条颜色和宽度
+    scene->addItem(lineItem);
 
+    linesArray.append(QJsonObject{
+        {"x1", x1},
+        {"y1", y1},
+        {"x2", x2},
+        {"y2", y2}
+    });
 
+    savePointsToJson();
+}
+
+void Widget::clickToConnectPoints(qreal x, qreal y)
+{
+    const qreal tolerance = 30;  // 将容忍范围减小为 10 像素
+
+    for (QGraphicsEllipseItem *point : points)
+    {
+        // 获取点的位置
+        QPointF pointPos = point->pos();
+        qDebug() << "Point position: " << pointPos;
+
+        // 判断鼠标点击的位置是否接近点
+        qreal distance = QLineF(QPointF(x, y), pointPos).length();
+        if (distance <= tolerance)  // 如果距离小于容忍范围，认为点击到该点
+        {
+            if (firstSelectedPoint == nullptr)
+            {
+                // 选择第一个点
+                firstSelectedPoint = point;
+                qDebug() << "First point selected at:" << pointPos;
+            }
+            else
+            {
+                // 选择第二个点并画线
+                QGraphicsLineItem *lineItem = new QGraphicsLineItem();
+                lineItem->setLine(QLineF(firstSelectedPoint->pos(), point->pos()));
+                lineItem->setPen(QPen(Qt::blue, 2));  // 设置线条颜色和宽度
+                scene->addItem(lineItem);
+                qDebug() << "Connecting points with line";
+
+                // 将这条线的信息保存到 linesArray 中
+                QJsonObject lineObject;
+                lineObject["x1"] = firstSelectedPoint->pos().x();
+                lineObject["y1"] = firstSelectedPoint->pos().y();
+                lineObject["x2"] = point->pos().x();
+                lineObject["y2"] = point->pos().y();
+                linesArray.append(lineObject);  // 保存线的 JSON 数据
+                lines.append(lineItem);
+                savePointsToJson();
+                // 连接完后清空选择的点
+                firstSelectedPoint = nullptr;
+            }
+            break;
+        }
+    }
+}

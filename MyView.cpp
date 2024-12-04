@@ -10,7 +10,6 @@ void MyView::wheelEvent(QWheelEvent *event)
         scale(1.2, 1.2);
     } else {
         scale(0.8, 0.8);
-        qDebug()<<"1111";
     }
     centerOn(scenePos);
 }
